@@ -1,0 +1,210 @@
+#!/usr/bin/python3 
+
+import os
+import sys
+import getopt
+import random
+from string import digits
+from string import ascii_letters
+from functools import reduce
+from pygments.console import colorize
+
+__version__ = "0.1.5"
+char_sets_path = 'CharSets'
+
+def usage():
+    print("Usage: bannerp [OPTION].. [TEXT]")
+    print("Banner Plus is another banner clone with extended functionality.")
+    print("Options:")
+    print("    -c, --char=[CHAR]          Print TEXT with symbols CHAR")
+    print("    -C, --char-color=[COLOR]   Print colored text. White by default")
+    print("    -r, --random-chars         Print TEXT with random ASCII letters")
+    print("    -x                         Print TEXT with its own symbols")
+    print("")
+    print("    -s, --space=[SPACE]        Print TEXT using SPACE as space and background symbols")
+    print("    -S, --space-color=[COLOR]  Print colored spaces and background. Black by default")
+    print("    -w, --space-width=[N]      Space width")
+    print("")
+    print("    -z, --zoom=[N]             Zoom text font N times")
+    print("    -W, --word-wrap            Wrap words if terminal size is too small")
+    print("    -m, --char-set=[MODULE]    Using specified char set")
+    print("")
+    print("    -l, --list-colors          List supported colors")
+    print("    -L, --list-char-sets       List available char sets")
+    print("    -h, --help                 Print this message and exit")
+    print("    -v, --version              Print program version and exit")
+    print("")
+    print("If TEXT is not specified, reads standart input.")
+    print("")
+
+def terminal_size():
+    """
+    Returns terminal width or 80 if real width cannot be detected.
+    """
+    try:
+        row, columns = os.popen("stty size", "r").read().split()
+        return int(columns)
+    except ValueError:
+        return 80
+
+def list_colors():
+    colors  = ["black", "darkred", "darkgreen", "brown", "darkblue", "purple", 
+               "teal", "lightgray",  "darkgray", "red", "green", "yellow", "blue",
+               "fuchsia", "turquoise", "white"]
+    [print(colorize(c, c)) for c in colors]
+
+def list_char_sets():
+    [print(f.split('.')[0]) for f in os.listdir(char_sets_path) if os.path.isfile(os.path.join(char_sets_path, f))]
+
+def main():
+    ## __ARGV__
+    try:
+        opts, text = getopt.getopt(sys.argv[1:], "c:s:z:w:m:C:S:WrxlLhv", \
+                        ["char=", "space=", "zoom=", "space-width=", \
+                         "char-set=", "char-color=", "space-color=", \
+                         "word-wrap", "random-chars", "x", "list-colors", \
+                         "list-char-sets", "help", "version"])
+    except getopt.GetoptError as err:
+        print(err, file=sys.stderr)
+        usage()
+        return 1
+
+    char         = False
+    char_color   = "white"
+    space_color  = "black"
+    random_chars = False
+    own_chars    = False
+    space        = False
+    space_width  = 2
+    word_wrap    = False
+    zoom         = 1
+    module       = 'DefaultEnRu7'
+
+    try:
+        for arg, val in opts:
+            if arg in ("--help", "-h"):
+                usage()
+                return 0
+            if arg in ("--version", "-v"):
+                print(__version__)
+                return 0
+            if arg in ("--list-colors", "-l"):
+                list_colors()
+                return 0
+            if arg in ("--list-char-sets", "-L"):
+                list_char_sets()
+                return 0
+            if arg in ("--char_set", "-m"):
+                module = val
+            elif arg in ("--char", "-c"):
+                char = val
+            elif arg in ("--space", "-s"):
+                space = val
+            elif arg in ("--zoom", "-z"):
+                zoom = int(val)
+            elif arg in ("--random-chars", "-r"):
+                random_chars = True
+            elif arg in ("--space-width", "-w"):
+                space_width = int(val)
+            elif arg in ("-x"):
+                own_chars = True
+            elif arg in ("--word-wrap", "-W"):
+                word_wrap = True
+            elif arg in ("--char-color", "-C"):
+                char_color = val
+            elif arg in ("--space-color", "-S"):
+                space_color = val
+    except ValueError:
+        print("error: unrecognized options", file=sys.stderr)
+        usage()
+        return 1
+    
+    char_set = __import__(module)
+     
+    if not char:
+        char = char_set.default_char
+    if not space:
+        space = char_set.default_space
+         
+    if (random_chars and own_chars) or \
+       (random_chars and char != char_set.default_char) or \
+       (own_chars    and char != char_set.default_char):
+        print("error: invalid option combination", file=sys.stderr)
+        return 1
+
+    ## __MAIN__
+    if not text:
+        text.append(input("Message: "))
+    # Fold the list of words to a string
+    str_text = reduce(lambda res, s: res + char_set.default_space + s, text, "").strip().upper() 
+
+    def set_modifier_chars():
+        if random_chars:
+            return lambda c: random.choice(ascii_letters)
+        elif char != char_set.default_char:
+            return lambda c: char
+        else:
+            return lambda c: c
+             
+    char_replace = set_modifier_chars() 
+
+    if word_wrap:
+        # Split the text into chunks of length less than terminal width 
+        screen_width = terminal_size()
+        text_for_print = []
+        while str_text:
+            sum_len = 0
+            for i, c in enumerate(str_text):
+                if (len(char_set.letters[c][0]) + space_width) * zoom > screen_width:
+                    print("Too small terminal")
+                    return 2
+                if (len(char_set.letters[c][0]) + space_width) * zoom + sum_len >= screen_width:
+                    text_for_print.append(str_text[:i])
+                    str_text = str_text[i:]
+                    break
+                else:
+                    sum_len += (len(char_set.letters[c][0]) + space_width) * zoom
+            else:
+                text_for_print.append(str_text)
+                str_text = ""
+    else:
+        text_for_print = [str_text]
+
+    # Process and print text
+    for text in text_for_print:
+        for line in range(char_set.char_height):
+            line_for_print = ""
+            for j, c in enumerate(text):
+                ch_line = char_set.letters[c][line]
+
+                if own_chars:
+                    ch_line = ch_line.replace(char_set.default_char, c)
+
+                line_for_print += ch_line
+                # Spaces between chars
+                if j != len(text) - 1:
+                    line_for_print += char_set.default_space * space_width
+                 
+            # Print top string of spaces
+            if line == 0:
+                print(colorize(space_color, space * zoom * len(line_for_print)))
+
+            for l in range(zoom):
+                for c in line_for_print:
+                    for w in range(zoom):
+                        if c == char_set.default_space:
+                            print(colorize(space_color, space), end="")
+                        else:
+                            print(colorize(char_color, char_replace(c)), end="")
+                print()
+                 
+        # Print bottom string of spaces
+        print(colorize(space_color, space * zoom * len(line_for_print)))
+    return 0
+        
+if __name__ == "__main__":
+    try:
+        sys.path.append(char_sets_path)
+        sys.exit(main())
+    except (EOFError, KeyboardInterrupt):
+        sys.exit(1)
